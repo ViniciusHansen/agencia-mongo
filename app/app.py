@@ -3,221 +3,174 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-from flask_sqlalchemy import SQLAlchemy
+from mongoengine import Document, connect, EmbeddedDocument, fields
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import create_engine
-from sqlalchemy.orm import relationship, sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
 import base64, os, json
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:postgres@db:5432/agencia_turismo'
 app.config['SECRET_KEY'] = 'GnXKv7!AV$hnjmgslOOHnElvbg7x24jbl&BvFEt^BJPNe&Uf4'
 app.config['JWT_SECRET_KEY'] = 'asdasdasdg40981t029478gb&*$986340270YIUR'  
 
-db = SQLAlchemy()
-db.init_app(app)
+app.config['PROPAGATE_EXCEPTIONS'] = True
 jwt = JWTManager(app)
 
-UPLOAD_FOLDER = './imagens_app'
 
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-# Mapeamento do Banco de dados para SQLAlchemy
-
-class Pacote(db.Model):
-    __tablename__ = 'Pacote'
-    codigo = db.Column(db.Integer, primary_key=True)
-    valor = db.Column(db.Float)
+# Conectar ao banco de dados MongoDB
+app.config['MONGO_DATABASE_RUI'] = 'mongodb://mongo:mongo@localhost:27017/agencia-turismo'
+connect(db="agencia-turismo", host=app.config['MONGO_DATABASE_RUI'])
 
 
-class Cidade(db.Model):
-    __tablename__ = 'Cidade'
-    codigo = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String)
-    estado = db.Column(db.String)
-    populacao = db.Column(db.Integer)
-    imagem = db.Column(db.LargeBinary)
-    visita = db.relationship('Visita', backref='cidade', lazy=True)
+class Cliente(Document):
+    codigo = fields.IntField(primary_key=True)
+    nome = fields.StringField()
+    email = fields.EmailField(unique=True)
+    senha_hash = fields.StringField()
+    endereco = fields.StringField()
+    fone = fields.StringField()
+
+class TipoVisita(Document):
+    codigo = fields.IntField(primary_key=True)
+    nome = fields.StringField()
 
 
-class TipoVisita(db.Model):
-    __tablename__ = 'Tipo Visita'
-    codigo = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String)
+class Pacote(Document):
+    codigo = fields.IntField(primary_key=True)
+    valor = fields.FloatField()
 
 
-class Visita(db.Model):
-    __tablename__ = 'Visita'
-    codigo = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String)
-    endereco = db.Column(db.String)
-    hora_ini = db.Column(db.DateTime)
-    hora_fim = db.Column(db.DateTime)
-    tipo_visita = db.Column(db.Integer, db.ForeignKey('Tipo Visita.codigo'))
-    codigo_cidade = db.Column(db.Integer, db.ForeignKey('Cidade.codigo'))
-    # categoria = db.Column(db.String)
-    # descricao = db.Column(db.String)
-    # preco_medio = db.Column(db.Float)
-    
+class Visita(Document):
+    codigo = fields.IntField(primary_key=True)
+    nome = fields.StringField()
+    endereco = fields.StringField()
+    hora_ini = fields.StringField()
+    hora_fim = fields.StringField()
+    tipo_visita = fields.IntField()
+    codigo_cidade = fields.IntField()
+    codigo_hotel = fields.IntField()
 
 
-class Hotel(db.Model):
-    __tablename__ = 'Hotel'
-    nome = db.Column(db.String)
-    codigo = db.Column(db.Integer, primary_key=True)
-    categoria = db.Column(db.String)
-    descricao = db.Column(db.String)
-    codigo_visita = db.Column(db.Integer, db.ForeignKey(
-        'Visita.codigo'))
-    imagem = db.Column(db.LargeBinary)
-    cidade_associada = db.Column(db.Integer)
+class Cidade(Document):
+    codigo = fields.IntField(primary_key=True)
+    nome = fields.StringField()
+    descricao = fields.StringField()
+    estado = fields.StringField()
+    populacao = fields.IntField()
+    imagem = fields.BinaryField()
 
 
-class Restaurante(db.Model):
-    __tablename__ = 'Restaurante'
-    codigo = db.Column(db.Integer, primary_key=True)
-    especialidade = db.Column(db.String)
-    preco_medio = db.Column(db.Float)
-    categoria = db.Column(db.String)
-    codigo_visita = db.Column(db.Integer, db.ForeignKey('Visita.codigo'))
-    hotel_associado = db.Column(
-        db.Integer, db.ForeignKey('Hotel.codigo_visita'))
-    casa_de_show_associada = db.Column(db.Integer)
-    imagem = db.Column(db.LargeBinary)
-    nome = db.Column(db.String)
-    descricao = db.Column(db.String)
-    cidade_associada = db.Column(db.Integer)
+class Hotel(Document):
+    codigo = fields.IntField(primary_key=True)
+    categoria = fields.StringField()
+    codigo_visita = fields.IntField(unique=True)
+    nome = fields.StringField()
+    descricao = fields.StringField()
+    imagem = fields.BinaryField()
 
 
-class Quarto(db.Model):
-    __tablename__ = 'Quarto'
-    codigo = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String)
-    valor = db.Column(db.Float)
-    tipo = db.Column(db.String)
-    codigo_hotel = db.Column(db.Integer, db.ForeignKey('Hotel.codigo_visita'))
+class Restaurante(Document):
+    codigo = fields.IntField(primary_key=True)
+    nome = fields.StringField()
+    especialidade = fields.StringField()
+    preco_medio = fields.FloatField()
+    categoria = fields.StringField()
+    codigo_visita = fields.IntField(unique=True)
+    hotel_associado = fields.IntField()
+    casa_de_show_associada = fields.IntField()
+    descricao = fields.StringField()
+    imagem = fields.BinaryField()
 
 
-class PontoTuristico(db.Model):
-    __tablename__ = 'Ponto Turistico'
-    codigo = db.Column(db.Integer, primary_key=True)
-    codigo_visita = db.Column(db.Integer, db.ForeignKey('Visita.codigo'))
-    imagem = db.Column(db.LargeBinary)
-    nome = db.Column(db.String)
-    descricao = db.Column(db.String)
-    cidade_associada = db.Column(db.Integer)
-
-class CasaDeShow(db.Model):
-    __tablename__ = 'Casa de Show'
-    codigo = db.Column(db.Integer, primary_key=True)
-    hora_ini = db.Column(db.Time)
-    hora_fim = db.Column(db.Time)
-    dia_fecha = db.Column(db.String)
-    codigo_pontoturistico = db.Column(
-        db.Integer, db.ForeignKey('Ponto Turistico.codigo'))
+class Quarto(Document):
+    codigo = fields.IntField(primary_key=True)
+    nome = fields.StringField()
+    valor = fields.FloatField()
+    tipo = fields.StringField()
+    codigo_hotel = fields.IntField()
 
 
-class Museu(db.Model):
-    __tablename__ = 'Museu'
-    codigo = db.Column(db.Integer, primary_key=True)
-    data_funda = db.Column(db.Date)
-    n_salas = db.Column(db.Integer)
-    codigo_pontoturistico = db.Column(
-        db.Integer, db.ForeignKey('Ponto Turistico.codigo'))
-    codigo_fundador = db.Column(db.Integer)
+class CasaDeShow(Document):
+    codigo_pontoturistico = fields.IntField(primary_key=True)
+    hora_ini = fields.StringField()
+    hora_fim = fields.StringField()
+    dia_fecha = fields.StringField()
+    nome = fields.StringField()
 
 
-class Fundador(db.Model):
-    __tablename__ = 'Fundador'
-    codigo = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String)
-    data_nasc = db.Column(db.Date)
-    data_obito = db.Column(db.Date)
-    trabalho = db.Column(db.String)
-    nacionalidade = db.Column(db.String)
+class PontoTuristico(Document):
+    codigo = fields.IntField(primary_key=True)
+    descricao = fields.StringField()
+    codigo_visita = fields.IntField(unique=True)
+    nome = fields.StringField()
+    imagem = fields.BinaryField()
 
 
-class Igreja(db.Model):
-    __tablename__ = 'Igreja'
-    codigo = db.Column(db.Integer, primary_key=True)
-    data_const = db.Column(db.Date)
-    estilo = db.Column(db.String)
-    codigo_pontoturistico = db.Column(
-        db.Integer, db.ForeignKey('Ponto Turistico.codigo'))
+class Museu(Document):
+    codigo_pontoturistico = fields.IntField()
+    data_funda = fields.DateField()
+    n_salas = fields.IntField()
+    codigo_fundador = fields.IntField()
 
 
-class Cliente(db.Model):
-    __tablename__ = 'Cliente'
-    codigo = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String)
-    email = db.Column(db.String(255))
-    endereco = db.Column(db.String)
-    fone = db.Column(db.String)
-    senha_hash = db.Column(db.String(255))
-
-    def set_password(self, senha):
-        self.senha_hash = generate_password_hash(senha)
-
-    def check_password(self, senha):
-        return check_password_hash(self.senha_hash, senha)
+class Fundador(Document):
+    codigo = fields.IntField(primary_key=True)
+    nome = fields.StringField()
+    data_nasc = fields.DateField()
+    data_obito = fields.DateField()
+    trabalho = fields.StringField()
+    nacionalidade = fields.StringField()
 
 
-class PessoaFisica(db.Model):
-    __tablename__ = 'Pessoa Fisica'
-    cpf = db.Column(db.String, primary_key=True)
-    codigo_cliente = db.Column(db.Integer, db.ForeignKey('Cliente.codigo'))
+class Igreja(Document):
+    codigo_pontoturistico = fields.IntField(unique=True)
+    data_const = fields.DateField()
+    estilo = fields.StringField()
 
 
-class PessoaJuridica(db.Model):
-    __tablename__ = 'Pessoa Juridica'
-    cnpj = db.Column(db.String, primary_key=True)
-    codigo_cliente = db.Column(db.Integer, db.ForeignKey('Cliente.codigo'))
 
 
-class Cliente_Pacote(db.Model):
-    __tablename__ = 'Cliente_Pacote'
-    Cliente_codigo = db.Column(db.Integer, db.ForeignKey(
-        'Cliente.codigo'), primary_key=True)
-    Pacote_codigo = db.Column(db.Integer, db.ForeignKey(
-        'Pacote.codigo'), primary_key=True)
+class PessoaFisica(Document):
+    cpf = fields.StringField(primary_key=True)
+    codigo_cliente = fields.IntField()
 
 
-class Pacote_Visita(db.Model):
-    __tablename__ = 'Pacote_Visita'
-    Pacote_codigo = db.Column(db.Integer, db.ForeignKey(
-        'Pacote.codigo'), primary_key=True)
-    Visita_codigo = db.Column(db.Integer, db.ForeignKey(
-        'Visita.codigo'), primary_key=True)
+class PessoaJuridica(Document):
+    cnpj = fields.StringField(primary_key=True)
+    codigo_cliente = fields.IntField()
 
 
-class Carrinho(db.Model):
-    __tablename__ = 'Carrinho'
-    codigo = db.Column(db.Integer, primary_key=True)
-    codigo_cliente = db.Column(db.Integer, db.ForeignKey('Cliente.codigo'))
-    pacotes = db.relationship('Pacote', secondary='carrinho_pacote')
+class Cliente_Pacote(Document):
+    Cliente_codigo = fields.IntField(unique=True)
+    Pacote_codigo = fields.IntField(unique=True)
 
-class Carrinho_Pacote(db.Model):
-    __tablename__ = 'carrinho_pacote'
-    carrinho_codigo = db.Column(db.Integer, db.ForeignKey('Carrinho.codigo'), primary_key=True)
-    pacote_codigo = db.Column(db.Integer, db.ForeignKey('Pacote.codigo'), primary_key=True)
+
+class Pacote_Visita(Document):
+    Pacote_codigo = fields.IntField(unique=True)
+    Visita_codigo = fields.IntField(unique=True)
+
+
+class Carrinho_Pacote(Document):
+    carrinho_codigo = fields.IntField(unique=True)
+    pacote_codigo = fields.IntField(unique=True)
+
+
+class Carrinho(Document):
+    codigo = fields.IntField(primary_key=True)
+    codigo_cliente = fields.ReferenceField(Cliente)
+    pacotes = fields.ListField(fields.ReferenceField(Pacote))
 
 
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 
-Base = declarative_base()
+# Base = declarative_base()
 
 
-def create_session():
-    engine = create_engine(
-        'postgresql://postgres:postgres@db:5432/agencia_turismo')
-    Session = sessionmaker(bind=engine)
-    return Session()
+# def create_session():
+#     engine = create_engine(
+#         'postgresql://postgres:postgres@db:5432/agencia_turismo')
+#     Session = sessionmaker(bind=engine)
+#     return Session()
 
 
 # alguns exemplos (se conexão com o frontend)
