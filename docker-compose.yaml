@@ -18,9 +18,11 @@ services:
     image: mongo:latest
     hostname: "agencia-mongo"
     environment:
-      - "MONGO_INITDB_ROOT_DATABASE = agencia-turismo"
-      - "MONGO_INITDB_ROOT_USERNAME = mongo"
-      - "MONGO_INITDB_ROOT_PASSWORD = mongo"
+      - "MONGO_INITDB_ROOT_DATABASE=agencia-turismo"
+      - "MONGO_INITDB_ROOT_USERNAME=mongo"
+      - "MONGO_INITDB_ROOT_PASSWORD=mongo"
+    volumes:
+      - ./init-db.js:/docker-entrypoint-initdb.d/init-db.js:ro
     ports:
       - "27018:27017"
 
