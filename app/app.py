@@ -56,6 +56,18 @@ def register():
 
     return render_template('signup.html')
 
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    user = db.clientes.find_one({"email": data['username']})
+
+    if user and check_password_hash(user.get('senha_hash', ''), data['password']):
+        access_token = create_access_token(identity=user.get('email'))
+        return jsonify({'access_token': access_token}), 200
+
+    return jsonify({'message': 'Invalid credentials'}), 401
+
+
 @app.route('/cidades', methods=['GET'])
 def get_cidades():
     # Obter todas as cidades usando o mongoengine
@@ -157,15 +169,7 @@ def get_visitas():
 
 
 
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.get_json()
-    user = Cliente.query.filter_by(email=data['username']).first()
-    pw = data['password']  # Mudança aqui
-    if user and check_password_hash(user.senha_hash, pw):
-        access_token = create_access_token(identity=user.email)
-        return jsonify({'access_token': access_token}), 200
-    return jsonify({'message': 'Invalid credentials'}), 401
+
 
 # @app.route('/visitas', methods=['POST'])
 # def get_visitas():
