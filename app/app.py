@@ -7,6 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import base64, os, json
 from pymongo import MongoClient
 from werkzeug.utils import secure_filename
+from bson import Binary
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'GnXKv7!AV$hnjmgslOOHnElvbg7x24jbl&BvFEt^BJPNe&Uf4'
@@ -67,193 +68,240 @@ def login():
 
     return jsonify({'message': 'Invalid credentials'}), 401
 
+@app.route('/add-cidade', methods=['POST'])
+def add_cidade():
+    nome = request.form.get('nome')
+    estado = request.form.get('estado')
+    populacao = request.form.get('populacao')
+    imagem = request.files['imagem'] if 'imagem' in request.files else None
+
+    if nome and estado and populacao:
+        # Processar a imagem da cidade como um BLOB
+        imagem_blob = None
+        if imagem:
+            # Converta a imagem para base64, se preferir
+            imagem_blob = Binary(base64.b64encode(imagem.read()))
+
+        nova_cidade = {
+            'nome': nome,
+            'estado': estado,
+            'populacao': populacao,
+            'imagem': imagem_blob
+        }
+
+        db.cidades.insert_one(nova_cidade)
+        return jsonify({'message': 'Cidade adicionada com sucesso'}), 201
+    else:
+        return jsonify({'message': 'Campos obrigatórios não preenchidos'}), 400
+
+
+@app.route('/add-hotel', methods=['POST'])
+def add_hotel():
+    nome = request.form.get('nome')
+    categoria = request.form.get('categoria')
+    descricao = request.form.get('descricao')
+    cidade_nome = request.form.get('cidadeAssociada')
+    cidade = db.cidades.find_one({'nome': cidade_nome})
+
+    if nome and categoria and descricao and cidade:
+        novo_hotel = {
+            'nome': nome,
+            'categoria': categoria,
+            'descricao': descricao,
+            'cidade_associada': cidade.get('_id', '')
+        }
+        
+        if 'imagem' in request.files:
+            imagem = request.files['imagem']
+            imagem_bin = Binary(base64.b64encode(imagem.read()))
+            novo_hotel['imagem'] = imagem_bin
+
+        db.hoteis.insert_one(novo_hotel)
+        return jsonify({'message': 'Hotel cadastrado com sucesso'}), 201
+    else:
+        return jsonify({'message': 'Campos obrigatórios não preenchidos ou cidade não encontrada'}), 400
+
+def get_codigo(email_usuario):
+    cliente = db.clientes.find_one({'email': email_usuario})
+    if cliente:
+        return cliente.get('codigo')
+    return None  # ou outro valor padrão, dependendo dos requisitos do seu aplicativo
+
+@app.route('/add-restaurante', methods=['POST'])
+def add_restaurante():
+    nome = request.form.get('nome')
+    especialidade = request.form.get('especialidade')
+    preco_medio = request.form.get('preco_medio')
+    categoria = request.form.get('categoria')
+    descricao = request.form.get('descricao')
+    cidade_nome = request.form.get('cidadeAssociada')
+    cidade = db.cidades.find_one({'nome': cidade_nome})
+
+
+    if nome and especialidade and preco_medio and categoria and descricao and cidade:
+        novo_restaurante = {
+            'nome': nome,
+            'especialidade': especialidade,
+            'preco_medio': preco_medio,
+            'categoria': categoria,
+            'descricao': descricao,
+            'cidade_associada': cidade.get('_id', '')
+        }
+
+        if 'imagem' in request.files:
+            imagem = request.files['imagem']
+            imagem_bin = Binary(base64.b64encode(imagem.read()))
+            novo_restaurante['imagem'] = imagem_bin
+
+        db.restaurantes.insert_one(novo_restaurante)
+        return jsonify({'message': 'Restaurante cadastrado com sucesso'}), 201
+    else:
+        return jsonify({'message': 'Campos obrigatórios não preenchidos ou cidade não encontrada'}), 400
+
+
+@app.route('/add-ponto-turistico', methods=['POST'])
+def add_ponto_turistico():
+    nome = request.form.get('nome')
+    descricao = request.form.get('descricao')
+    cidade_nome = request.form.get('cidadeAssociada')
+    cidade = db.cidades.find_one({'nome': cidade_nome})
+
+    imagem = request.files['imagem'] if 'imagem' in request.files else None
+
+    if nome and descricao and cidade:
+        novo_ponto_turistico = {
+            'nome': nome,
+            'descricao': descricao,
+            'cidade_associada': cidade.get('_id', '')
+        }
+
+        if imagem:
+            imagem_bin = Binary(base64.b64encode(imagem.read()))
+            novo_ponto_turistico['imagem'] = imagem_bin
+
+        db.pontos_turisticos.insert_one(novo_ponto_turistico)
+        return jsonify({'message': 'Ponto turístico cadastrado com sucesso'}), 201
+    else:
+        return jsonify({'message': 'Campos obrigatórios não preenchidos ou cidade não encontrada'}), 400
+
 
 @app.route('/cidades', methods=['GET'])
 def get_cidades():
-    # Obter todas as cidades usando o mongoengine
-    cidades = Cidade.objects()
+    # Obter todas as cidades usando o PyMongo
+    cidades = db.cidades.find()
 
     # Converter as cidades para o formato desejado
     cidades_formatadas = [
-        {'nome': cidade.nome, 'estado': cidade.estado, 'populacao': cidade.populacao}
+        {'nome': cidade['nome'], 'estado': cidade['estado'], 'populacao': cidade['populacao']}
         for cidade in cidades
     ]
 
     return jsonify(cidades_formatadas), 200
 
+@app.route('/hoteis', methods=['GET'])
+def get_hoteis():
+    cidade_nome = request.args.get('cidade')
+    cidade_associada = db.cidades.find_one({'nome': cidade_nome})
+
+    if cidade_associada:
+        hoteis = db.hoteis.find({'cidade_associada': cidade_associada['_id']})
+    else:
+        hoteis = db.hoteis.find()
+
+    return jsonify([{'nome': hotel['nome'], 'categoria': hotel['categoria'], 'descricao': hotel['descricao']} for hotel in hoteis]), 200
+
+@app.route('/restaurantes', methods=['GET'])
+def get_restaurantes():
+    cidade_nome = request.args.get('cidade')
+    cidade_associada = db.cidades.find_one({'nome': cidade_nome})
+
+    if cidade_associada:
+        restaurantes = db.restaurantes.find({'cidade_associada': cidade_associada['_id']})
+    else:
+        restaurantes = db.restaurantes.find()
+
+    return jsonify([{'nome': restaurante['nome'], 'especialidade': restaurante['especialidade'], 'preco_medio': restaurante['preco_medio']} for restaurante in restaurantes]), 200
+
+@app.route('/pontos-turisticos', methods=['GET'])
+def get_pontos_turisticos():
+    cidade_nome = request.args.get('cidade')
+    cidade_associada = db.cidades.find_one({'nome': cidade_nome})
+
+    if cidade_associada:
+        pontos_turisticos = db.pontos_turisticos.find({'cidade_associada': cidade_associada['_id']})
+    else:
+        pontos_turisticos = db.pontos_turisticos.find()
+
+    return jsonify([{'nome': ponto_turistico['nome'], 'descricao': ponto_turistico['descricao']} for ponto_turistico in pontos_turisticos]), 200
+
+
+app.config['MONGO_URI'] = 'mongodb://localhost:27017/nome-do-seu-banco-de-dados'
+mongo = MongoClient(app.config['MONGO_URI'])
+db = mongo.db
 
 @app.route('/visitas', methods=['POST'])
 def get_visitas():
     data = request.json
-    # visitas = Visita.query.all()  # Obtém todas as visitas
-    visitas = Visita.objects().all()
+    visitas = db.visitas.find()
+
     resultado = []
 
     for visita in visitas:
-        # Estrutura de dados para acumular informações da visita
+        cidade = db.cidades.find_one({'_id': visita['cidade']})
         cidade_info = {
-            'codigo': visita.cidade.codigo,
-            'nome': visita.cidade.nome,
-            'estado': visita.cidade.estado,
-            'populacao': visita.cidade.populacao,
-            # Converte a imagem para uma string base64, se houver imagem.
-            'imagem': base64.b64encode(visita.cidade.imagem.read()).decode('utf-8') if visita.cidade.imagem else None
+            'codigo': str(cidade['_id']),  # Renomeie '_id' para 'codigo'
+            'nome': cidade['nome'],
+            'estado': cidade['estado'],
+            'populacao': cidade['populacao'],
+            'imagem': base64.b64encode(cidade['imagem']).decode('utf-8') if 'imagem' in cidade else None
         }
+
         detalhes_visita = {
-            'codigo': str(visita.codigo),
-            'nome': visita.nome,
-            'endereco': visita.endereco,
-            'hora_ini': str(visita.hora_ini),
-            'hora_fim': str(visita.hora_fim),
-            'tipo_visita': visita.tipo_visita,
+            'codigo': str(visita['_id']),  # Renomeie '_id' para 'codigo'
+            'nome': visita['nome'],
+            'endereco': visita['endereco'],
+            'hora_ini': str(visita['hora_ini']),
+            'hora_fim': str(visita['hora_fim']),
+            'tipo_visita': visita['tipo_visita'],
             'cidade': cidade_info,
             'hoteis': [],
             'restaurantes': [],
             'pontos_turisticos': []
         }
 
-        # Encontra todas as informações associadas a essa visita
-        hoteis = Hotel.objects(codigo_visita=visita.codigo).all()
-        restaurantes = Restaurante.objects(codigo_visita=visita.codigo).all()
-        pontos_turisticos = PontoTuristico.objects(codigo_visita=visita.codigo).all()
+        hoteis = db.hoteis.find({'codigo_visita': visita['_id']})
+        restaurantes = db.restaurantes.find({'codigo_visita': visita['_id']})
+        pontos_turisticos = db.pontos_turisticos.find({'codigo_visita': visita['_id']})
 
         for hotel in hoteis:
-            if hotel.imagem:
-                detalhes_visita['hoteis'].append({
-                    'nome': hotel.nome,
-                    'imagem': base64.b64encode(hotel.imagem.read()).decode('utf-8')
-                })
-            else:
-                detalhes_visita['hoteis'].append({
-                    'nome': hotel.nome,
-                    'imagem': None
-                })
+            detalhes_visita['hoteis'].append({
+                'codigo': str(hotel['_id']),  # Renomeie '_id' para 'codigo'
+                'nome': hotel['nome'],
+                'imagem': base64.b64encode(hotel['imagem']).decode('utf-8') if 'imagem' in hotel else None
+            })
 
         for restaurante in restaurantes:
-            if restaurante.imagem:
-                detalhes_visita['restaurantes'].append({
-                    'nome': restaurante.nome,
-                    'preco_medio': restaurante.preco_medio,
-                    'especialidade': restaurante.especialidade,
-                    'categoria': restaurante.categoria,
-                    'imagem': base64.b64encode(restaurante.imagem.read()).decode('utf-8')
-                })
-            else:
-                detalhes_visita['restaurantes'].append({
-                    'nome': restaurante.nome,
-                    'preco_medio': restaurante.preco_medio,
-                    'especialidade': restaurante.especialidade,
-                    'categoria': restaurante.categoria,
-                    'imagem': None
-                })
+            detalhes_visita['restaurantes'].append({
+                'codigo': str(restaurante['_id']),  # Renomeie '_id' para 'codigo'
+                'nome': restaurante['nome'],
+                'preco_medio': restaurante['preco_medio'],
+                'especialidade': restaurante['especialidade'],
+                'categoria': restaurante['categoria'],
+                'imagem': base64.b64encode(restaurante['imagem']).decode('utf-8') if 'imagem' in restaurante else None
+            })
 
         for ponto_turistico in pontos_turisticos:
-            if ponto_turistico.imagem:
-                detalhes_visita['pontos_turisticos'].append({
-                    'nome': ponto_turistico.nome,
-                    'descricao': ponto_turistico.descricao,
-                    'imagem': base64.b64encode(ponto_turistico.imagem.read()).decode('utf-8')
-                })
-            else:
-                detalhes_visita['pontos_turisticos'].append({
-                    'nome': ponto_turistico.nome,
-                    'descricao': ponto_turistico.descricao,
-                    'imagem': None
-                })
+            detalhes_visita['pontos_turisticos'].append({
+                'codigo': str(ponto_turistico['_id']),  # Renomeie '_id' para 'codigo'
+                'nome': ponto_turistico['nome'],
+                'descricao': ponto_turistico['descricao'],
+                'imagem': base64.b64encode(ponto_turistico['imagem']).decode('utf-8') if 'imagem' in ponto_turistico else None
+            })
 
         resultado.append(detalhes_visita)
 
     return jsonify(resultado), 200
 
-
-
-
-
-
-
-# @app.route('/visitas', methods=['POST'])
-# def get_visitas():
-#     data = request.json
-#     # visitas = Visita.query.all()  # Obtém todas as visitas
-#     visitas = Visita.query.options(db.joinedload(Visita.cidade)).all()
-#     resultado = []
-
-#     for visita in visitas:
-#         # Estrutura de dados para acumular informações da visita
-#         cidade_info = {
-#             'codigo': visita.cidade.codigo,
-#             'nome': visita.cidade.nome,
-#             'estado': visita.cidade.estado,
-#             'populacao': visita.cidade.populacao,
-#             # Converte a imagem para uma string base64, se houver imagem.
-#             'imagem': base64.b64encode(visita.cidade.imagem).decode('utf-8') if visita.cidade.imagem else None
-#         }
-#         detalhes_visita = {
-#             'codigo': visita.codigo,
-#             'nome': visita.nome,
-#             'endereco': visita.endereco,
-#             'hora_ini': str(visita.hora_ini),
-#             'hora_fim': str(visita.hora_fim),
-#             'tipo_visita': visita.tipo_visita,
-#             'cidade': cidade_info,
-#             'hoteis': [],
-#             'restaurantes': [],
-#             'pontos_turisticos': []
-#         }
-
-#         # Encontra todas as informações associadas a essa visita
-#         hoteis = Hotel.query.filter_by(codigo_visita=visita.codigo).all()
-#         restaurantes = Restaurante.query.filter_by(codigo_visita=visita.codigo).all()
-#         pontos_turisticos = PontoTuristico.query.filter_by(codigo_visita=visita.codigo).all()
-
-#         for hotel in hoteis:
-#             if hotel.imagem:
-#                 detalhes_visita['hoteis'].append({
-#                     'nome': hotel.nome,
-#                     'imagem': base64.b64encode(hotel.imagem).decode('utf-8')
-#                 })
-#             else:
-#                 detalhes_visita['hoteis'].append({
-#                     'nome': hotel.nome,
-#                     'imagem' : None
-#                 })
-                
-
-#         for restaurante in restaurantes:
-#             if restaurante.imagem:
-#                 detalhes_visita['restaurantes'].append({
-#                     'nome': restaurante.nome,
-#                     'preco_medio': restaurante.preco_medio,
-#                     'especialidade': restaurante.especialidade,
-#                     'categoria': restaurante.categoria,
-#                     'imagem': base64.b64encode(restaurante.imagem).decode('utf-8')
-#                 })
-#             else:
-#                 detalhes_visita['restaurantes'].append({
-#                     'nome': restaurante.nome,
-#                     'preco_medio': restaurante.preco_medio,
-#                     'especialidade': restaurante.especialidade,
-#                     'categoria': restaurante.categoria,
-#                     'imagem': None
-#                 })
-
-#         for ponto_turistico in pontos_turisticos:
-#             if ponto_turistico.imagem:
-#                 detalhes_visita['pontos_turisticos'].append({
-#                     'nome': ponto_turistico.nome,
-#                     'descricao': ponto_turistico.descricao,
-#                     'imagem': base64.b64encode(ponto_turistico.imagem).decode('utf-8')
-#                 })
-#             else:
-#                 detalhes_visita['pontos_turisticos'].append({
-#                     'nome': ponto_turistico.nome,
-#                     'descricao': ponto_turistico.descricao,
-#                     'imagem': None
-#                 })
-
-#         resultado.append(detalhes_visita)
-
-#     return jsonify(resultado), 200
 
 @app.route('/add-visita', methods=['POST'])
 def add_visita():
@@ -268,48 +316,44 @@ def add_visita():
 
     # Processa os campos selecionados
     cidade_nome = json_data.get('cidade', {}).get('value')
-    cidade = Cidade.query.filter_by(nome=cidade_nome).first()
-    
+    cidade = db.cidades.find_one({'nome': cidade_nome})
+
     restaurante = None
     pontoTuristico = None
     hotel = None
 
     if json_data.get('restaurante', {}) != None:
         restaurante_nome = json_data.get('restaurante', {}).get('value')
-        restaurante = Restaurante.query.filter_by(nome=restaurante_nome).first()
+        restaurante = db.restaurantes.find_one({'nome': restaurante_nome})
 
     if json_data.get('pontoTuristico', {}) != None:
         pontoTuristico_nome = json_data.get('pontoTuristico', {}).get('value')
-        pontoTuristico = PontoTuristico.query.filter_by(nome=pontoTuristico_nome).first()
+        pontoTuristico = db.pontos_turisticos.find_one({'nome': pontoTuristico_nome})
 
     if json_data.get('hotel', {}) != None:
         hotel_nome = json_data.get('hotel', {}).get('value')
-        hotel = Hotel.query.filter_by(nome=hotel_nome).first()
+        hotel = db.hoteis.find_one({'nome': hotel_nome})
 
     # Crie a visita no banco de dados
-    nova_visita = Visita(
-        nome=visita_nome,
-        endereco=endereco,
-        hora_ini=hora_ini,
-        hora_fim=hora_fim,
-        cidade=cidade
-    )
+    nova_visita = {
+        'nome': visita_nome,
+        'endereco': endereco,
+        'hora_ini': hora_ini,
+        'hora_fim': hora_fim,
+        'cidade': cidade
+    }
 
-    db.session.add(nova_visita)
-    db.session.commit()
+    db.visitas.insert_one(nova_visita)
 
     # Adicione o código da visita ao hotel, restaurante ou ponto turístico
     if restaurante:
-        restaurante.codigo_visita = nova_visita.codigo
-        db.session.commit()
+        db.restaurantes.update_one({'_id': restaurante['_id']}, {'$set': {'codigo_visita': nova_visita['_id']}})
 
     if pontoTuristico:
-        pontoTuristico.codigo_visita = nova_visita.codigo
-        db.session.commit()
+        db.pontos_turisticos.update_one({'_id': pontoTuristico['_id']}, {'$set': {'codigo_visita': nova_visita['_id']}})
 
     if hotel:
-        hotel.codigo_visita = nova_visita.codigo
-        db.session.commit()
+        db.hoteis.update_one({'_id': hotel['_id']}, {'$set': {'codigo_visita': nova_visita['_id']}})
 
     return jsonify({'message': 'Visita cadastrada com sucesso'}), 201
 
@@ -354,90 +398,7 @@ def cancel_reserva():
     db.session.commit()
     return jsonify({'message': 'Reservation cancelled successfully'}), 200
 
-@app.route('/hoteis', methods=['GET'])
-def get_hoteis():
-    cidade_nome = request.args.get('cidade')
-    cidade_associada = Cidade.query.filter_by(nome=cidade_nome).first()
-    
-    if cidade_associada:
-        hoteis = Hotel.query.filter_by(cidade_associada=cidade_associada.codigo).all()
-    else:
-        hoteis = Hotel.query.all()
 
-    return jsonify([{'nome': hotel.nome, 'categoria': hotel.categoria, 'descricao': hotel.descricao} for hotel in hoteis]), 200
-
-@app.route('/restaurantes', methods=['GET'])
-def get_restaurantes():
-    cidade_nome = request.args.get('cidade')
-    cidade_associada = Cidade.query.filter_by(nome=cidade_nome).first()
-    
-    if cidade_associada:
-        restaurantes = Restaurante.query.filter_by(cidade_associada=cidade_associada.codigo).all()
-    else:
-        restaurantes = Restaurante.query.all()
-
-    return jsonify([{'nome': restaurante.nome, 'especialidade': restaurante.especialidade, 'preco_medio': restaurante.preco_medio} for restaurante in restaurantes]), 200
-
-@app.route('/pontos-turisticos', methods=['GET'])
-def get_pontos_turisticos():
-    cidade_nome = request.args.get('cidade')
-    cidade_associada = Cidade.query.filter_by(nome=cidade_nome).first()
-    
-    if cidade_associada:
-        pontos_turisticos = PontoTuristico.query.filter_by(cidade_associada=cidade_associada.codigo).all()
-    else:
-        pontos_turisticos = PontoTuristico.query.all()
-
-    return jsonify([{'nome': ponto_turistico.nome, 'descricao': ponto_turistico.descricao} for ponto_turistico in pontos_turisticos]), 200
-
-
-@app.route('/add-cidade', methods=['POST'])
-def add_cidade():
-    nome = request.form.get('nome')
-    estado = request.form.get('estado')
-    populacao = request.form.get('populacao')
-    imagem = request.files['imagem'] if 'imagem' in request.files else None
-
-    if nome and estado and populacao:
-        # Processar a imagem da cidade como um BLOB
-        imagem_blob = imagem.read() if imagem else None  # Ou converta para Base64 se o banco exigir
-
-        nova_cidade = Cidade(nome=nome, estado=estado, populacao=populacao, imagem=imagem_blob)
-        db.session.add(nova_cidade)
-        db.session.commit()
-        return jsonify({'message': 'Cidade adicionada com sucesso'}), 201
-    else:
-        return jsonify({'message': 'Campos obrigatórios não preenchidos'}), 400
-
-
-@app.route('/add-hotel', methods=['POST'])
-def add_hotel():
-    nome = request.form.get('nome')
-    categoria = request.form.get('categoria')
-    descricao = request.form.get('descricao')
-    cidadeAssociada = request.form.get('cidadeAssociada')
-    cidade = Cidade.query.filter_by(nome=cidadeAssociada).first()
-
-
-    if nome and categoria and descricao:
-        novo_hotel = Hotel(nome=nome, categoria=categoria, descricao=descricao, cidade_associada=cidade.codigo)
-        
-        if "imagem" in request.files:
-            imagem = request.files["imagem"]
-            imagem_nome = secure_filename(imagem.filename)
-            imagem_bin = imagem.read()
-            novo_hotel.imagem = imagem_bin
-        
-        db.session.add(novo_hotel)
-        db.session.commit()
-        return jsonify({'message': 'Hotel cadastrado com sucesso'}), 201
-    else:
-        return jsonify({'message': 'Campos obrigatórios não preenchidos'}), 400
-
-def get_codigo(email_usuario):
-    cliente = Cliente.query.filter_by(email=email_usuario).first()
-    if cliente:
-        return cliente.codigo
 
 
 @app.route('/api/checkout', methods=['POST'])
@@ -465,48 +426,6 @@ def checkout():
 
     return jsonify({"pacoteCodigo": novo_pacote.codigo}), 200
 
-
-@app.route('/add-restaurante', methods=['POST'])
-def add_restaurante():
-    nome = request.form.get('nome')
-    especialidade = request.form.get('especialidade')
-    preco_medio = request.form.get('preco_medio')
-    categoria = request.form.get('categoria')
-    descricao = request.form.get('descricao')
-    cidadeAssociada = request.form.get('cidadeAssociada')
-    cidade = Cidade.query.filter_by(nome=cidadeAssociada).first()
-
-
-    if nome and especialidade and preco_medio and categoria and descricao:
-        novo_restaurante = Restaurante(nome=nome, especialidade=especialidade, preco_medio=preco_medio,
-                                       categoria=categoria, descricao=descricao, cidade_associada=cidade.codigo)
-        if "imagem" in request.files:
-            imagem = request.files["imagem"]
-            imagem_nome = secure_filename(imagem.filename)
-            imagem_bin = imagem.read()
-            novo_restaurante.imagem = imagem_bin
-        db.session.add(novo_restaurante)
-        db.session.commit()
-        return jsonify({'message': 'Restaurante cadastrado com sucesso'}), 201
-    else:
-        return jsonify({'message': 'Campos obrigatórios não preenchidos'}), 400
-
-@app.route('/add-ponto-turistico', methods=['POST'])
-def add_ponto_turistico():
-    nome = request.form.get('nome')
-    descricao = request.form.get('descricao')
-    cidadeAssociada = request.form.get('cidadeAssociada')
-    cidade = Cidade.query.filter_by(nome=cidadeAssociada).first()
-
-    imagem = request.files['imagem'] if 'imagem' in request.files else None
-
-    if nome and descricao:
-        novo_ponto_turistico = PontoTuristico(nome=nome, descricao=descricao, imagem=imagem,cidade_associada=cidade.codigo)
-        db.session.add(novo_ponto_turistico)
-        db.session.commit()
-        return jsonify({'message': 'Ponto turístico cadastrado com sucesso'}), 201
-    else:
-        return jsonify({'message': 'Campos obrigatórios não preenchidos'}), 400
 
 
 @app.route('/carrinho/add', methods=['POST'])
