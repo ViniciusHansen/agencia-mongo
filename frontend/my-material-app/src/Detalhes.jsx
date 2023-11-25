@@ -119,7 +119,7 @@ const Detalhes = ({ pacote, onAdd, goBack, isLogged }) => {
                       ? `data:image/png;base64, ${pontoInteresseImagem}`
                       : "https://demofree.sirv.com/nope-not-here.jpg"
                   }
-                  alt="Imagem do Hotel"
+                  alt="Imagem do Ponto de Interesse"
                 />
 
                 <CardContent className={classes.cardContent}>

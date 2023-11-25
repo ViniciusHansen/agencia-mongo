@@ -8,6 +8,7 @@ import base64, os, json
 from pymongo import MongoClient
 from werkzeug.utils import secure_filename
 from bson import Binary
+from bson import ObjectId
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'GnXKv7!AV$hnjmgslOOHnElvbg7x24jbl&BvFEt^BJPNe&Uf4'
@@ -22,7 +23,7 @@ jwt = JWTManager(app)
 client = MongoClient(host='agencia-mongo',
                          port=27017, 
                          username='mongo', 
-                         password='mongo')
+                         password='mongo',)
 db = client['agencia-turismo']
 
 
@@ -235,9 +236,6 @@ def get_pontos_turisticos():
     return jsonify([{'nome': ponto_turistico['nome'], 'descricao': ponto_turistico['descricao']} for ponto_turistico in pontos_turisticos]), 200
 
 
-app.config['MONGO_URI'] = 'mongodb://localhost:27017/nome-do-seu-banco-de-dados'
-mongo = MongoClient(app.config['MONGO_URI'])
-db = mongo.db
 
 @app.route('/visitas', methods=['POST'])
 def get_visitas():
@@ -247,7 +245,7 @@ def get_visitas():
     resultado = []
 
     for visita in visitas:
-        cidade = db.cidades.find_one({'_id': visita['cidade']})
+        cidade = db.cidades.find_one({'_id': visita['cidade']['_id']})
         cidade_info = {
             'codigo': str(cidade['_id']),  # Renomeie '_id' para 'codigo'
             'nome': cidade['nome'],
@@ -262,7 +260,6 @@ def get_visitas():
             'endereco': visita['endereco'],
             'hora_ini': str(visita['hora_ini']),
             'hora_fim': str(visita['hora_fim']),
-            'tipo_visita': visita['tipo_visita'],
             'cidade': cidade_info,
             'hoteis': [],
             'restaurantes': [],
@@ -360,10 +357,10 @@ def add_visita():
 
 @app.route('/obterCodigoCidade/<nome_cidade>', methods=['GET'])
 def obter_codigo_cidade(nome_cidade):
-    cidade = Cidade.query.filter_by(nome=nome_cidade).first()
+    cidade = db.cidades.find_one({'nome': nome_cidade})
 
     if cidade:
-        return jsonify({'codigo': cidade.codigo}), 200
+        return jsonify({'codigo': str(cidade['_id'])}), 200
     else:
         return jsonify({'error': 'Cidade não encontrada'}), 404
 
@@ -372,34 +369,39 @@ def obter_codigo_cidade(nome_cidade):
 def reserve_pacote():
     data = request.get_json()
     cliente_id = get_jwt_identity()
-    cliente = Cliente.query.filter_by(email=cliente_id).first()
-    if cliente:
-        nova_reserva = Cliente_Pacote(Cliente_codigo=cliente.codigo, Pacote_codigo=data['pacote_codigo'])
-        db.session.add(nova_reserva)
-        db.session.commit()
-        return jsonify({'message': 'Reservation made successfully'}), 200
-    return jsonify({'message': 'Customer not found'}), 404
+    cliente = db.clientes.find_one({'email': cliente_id})
 
+    if cliente:
+        nova_reserva = {
+            'Cliente_codigo': cliente['_id'],
+            'Pacote_codigo': ObjectId(data['pacote_codigo'])
+        }
+
+        db.reservas.insert_one(nova_reserva)
+        return jsonify({'message': 'Reserva feita com sucesso'}), 200
+
+    return jsonify({'message': 'Cliente não encontrado'}), 404
+
+# Adaptação para listar reservas usando PyMongo
 @app.route('/reservas', methods=['GET'])
 @jwt_required()
 def list_reservas():
     cliente_id = get_jwt_identity()
-    cliente = Cliente.query.filter_by(email=cliente_id).first()
-    reservas = Cliente_Pacote.query.filter_by(Cliente_codigo=cliente.codigo).all()
-    return jsonify([{'Pacote_codigo': reserva.Pacote_codigo} for reserva in reservas]), 200
+    cliente = db.clientes.find_one({'email': cliente_id})
+    reservas = db.reservas.find({'Cliente_codigo': cliente['_id']})
 
+    return jsonify([{'Pacote_codigo': str(reserva['Pacote_codigo'])} for reserva in reservas]), 200
+
+# Adaptação para cancelar reserva usando PyMongo
 @app.route('/reservas/cancelar', methods=['DELETE'])
 @jwt_required()
 def cancel_reserva():
     data = request.get_json()
     cliente_id = get_jwt_identity()
-    cliente = Cliente.query.filter_by(email=cliente_id).first()
-    Cliente_Pacote.query.filter_by(Cliente_codigo=cliente.codigo, Pacote_codigo=data['pacote_codigo']).delete()
-    db.session.commit()
-    return jsonify({'message': 'Reservation cancelled successfully'}), 200
+    cliente = db.clientes.find_one({'email': cliente_id})
 
-
-
+    db.reservas.delete_one({'Cliente_codigo': cliente['_id'], 'Pacote_codigo': ObjectId(data['pacote_codigo'])})
+    return jsonify({'message': 'Reserva cancelada com sucesso'}), 200
 
 @app.route('/api/checkout', methods=['POST'])
 def checkout():
@@ -407,63 +409,65 @@ def checkout():
     itens = data['itens']
     usuario = data['usuario']
 
-
-    # Criar um novo pacote (ajuste de acordo com seus campos e lógica)
-    novo_pacote = Pacote(valor=5000)
-    db.session.add(novo_pacote)
-    db.session.flush()  # Para obter o código do pacote antes do commit
+    # Criar um novo pacote no MongoDB (ajuste de acordo com seus campos e lógica)
+    novo_pacote = {
+        'valor': 5000,
+        'itens': []  # Lista para armazenar os itens do carrinho
+    }
 
     # Associar cada item do carrinho ao pacote
     for item in itens:
-        pacote_visita = Pacote_Visita(Pacote_codigo=novo_pacote.codigo, Visita_codigo=item['codigo'])
-        db.session.add(pacote_visita)
+        novo_pacote['itens'].append({
+            'Visita_codigo': ObjectId(item['codigo'])
+        })
 
     # Associar pacote ao cliente (ajuste conforme necessário)
-    cliente_pacote = Cliente_Pacote(Cliente_codigo=get_codigo(usuario), Pacote_codigo=novo_pacote.codigo)
-    db.session.add(cliente_pacote)
+    cliente = db.clientes.find_one({'email': usuario})
+    novo_pacote['Cliente_codigo'] = cliente['_id']
 
-    db.session.commit()
+    # Inserir o novo pacote no MongoDB
+    result = db.pacotes.insert_one(novo_pacote)
+    pacote_codigo = str(result.inserted_id)
 
-    return jsonify({"pacoteCodigo": novo_pacote.codigo}), 200
-
-
+    return jsonify({"pacoteCodigo": pacote_codigo}), 200
 
 @app.route('/carrinho/add', methods=['POST'])
 @jwt_required()
 def add_to_carrinho():
     data = request.get_json()
     cliente_id = get_jwt_identity()
-    cliente = Cliente.query.filter_by(email=cliente_id).first()
+    cliente = db.clientes.find_one({'email': cliente_id})
 
     if cliente:
-        carrinho = Carrinho.query.filter_by(codigo_cliente=cliente.codigo).first()
+        carrinho = db.carrinhos.find_one({'codigo_cliente': cliente['_id']})
         if not carrinho:
-            carrinho = Carrinho(codigo_cliente=cliente.codigo)
-            db.session.add(carrinho)
-        
-        pacote = Pacote.query.get(data['pacote_codigo'])
-        if pacote and pacote not in carrinho.pacotes:
-            carrinho.pacotes.append(pacote)
-            db.session.commit()
+            carrinho = {
+                'codigo_cliente': cliente['_id'],
+                'pacotes': []
+            }
+
+        pacote = db.pacotes.find_one({'_id': ObjectId(data['pacote_codigo'])})
+        if pacote and pacote not in carrinho['pacotes']:
+            carrinho['pacotes'].append(pacote['_id'])
+            db.carrinhos.save(carrinho)
             return jsonify({'message': 'Pacote added to cart'}), 200
         return jsonify({'message': 'Package not found or already in cart'}), 404
     return jsonify({'message': 'Customer not found'}), 404
-
 
 @app.route('/carrinho/remove', methods=['POST'])
 @jwt_required()
 def remove_from_carrinho():
     data = request.get_json()
     cliente_id = get_jwt_identity()
-    cliente = Cliente.query.filter_by(email=cliente_id).first()
+    cliente = db.clientes.find_one({'email': cliente_id})
 
     if cliente:
-        carrinho = Carrinho.query.filter_by(codigo_cliente=cliente.codigo).first()
+        carrinho = db.carrinhos.find_one({'codigo_cliente': cliente['_id']})
         if carrinho:
-            pacote = Pacote.query.get(data['pacote_codigo'])
-            if pacote and pacote in carrinho.pacotes:
-                carrinho.pacotes.remove(pacote)
-                db.session.commit()
+            pacote = db.pacotes.find_one({'_id': ObjectId(data['pacote_codigo'])})
+            if pacote and pacote['_id'] in carrinho['pacotes']:
+                carrinho['pacotes'].remove(pacote['_id'])
+                db.carrinhos.save(carrinho)
                 return jsonify({'message': 'Pacote removed from cart'}), 200
             return jsonify({'message': 'Package not found in cart'}), 404
         return jsonify({'message': 'Cart not found'}), 404
@@ -474,55 +478,58 @@ def remove_from_carrinho():
 @jwt_required()
 def view_carrinho():
     cliente_id = get_jwt_identity()
-    cliente = Cliente.query.filter_by(email=cliente_id).first()
+    cliente = db.clientes.find_one({'email': cliente_id})
 
     if cliente:
-        carrinho = Carrinho.query.filter_by(codigo_cliente=cliente.codigo).first()
+        carrinho = db.carrinhos.find_one({'codigo_cliente': cliente['_id']})
         if carrinho:
-            pacotes = [{'codigo': p.codigo, 'nome': p.nome, 'valor': p.valor} for p in carrinho.pacotes]
+            pacotes = []
+            for pacote_id in carrinho['pacotes']:
+                pacote = db.pacotes.find_one({'_id': pacote_id})
+                if pacote:
+                    pacotes.append({
+                        'codigo': str(pacote['_id']),
+                        'nome': pacote['nome'],
+                        'valor': pacote['valor']
+                    })
             return jsonify({'pacotes': pacotes}), 200
         return jsonify({'message': 'No cart found'}), 404
     return jsonify({'message': 'Customer not found'}), 404
 
+def get_email_from_cliente(cliente_codigo):
+    cliente = db.clientes.find_one({'_id': cliente_codigo})
+    return cliente['email'] if cliente else None
+
 
 @app.route('/admin/pacotes', methods=['GET'])
-# @jwt_required()
 def admin_pacotes():
-    # Esta rota é acessível apenas por administradores
-    # Aqui, você pode adicionar lógica para verificar se o usuário é um administrador
-
-    # Buscar todos os pacotes reservados e seus detalhes
-    pacotes_reservados = db.session.query(Cliente_Pacote, Cliente, Pacote).join(
-        Cliente, Cliente_Pacote.Cliente_codigo == Cliente.codigo).join(
-        Pacote, Cliente_Pacote.Pacote_codigo == Pacote.codigo).all()
+    pacotes_reservados = db.pacotes.find()
 
     resultado = []
-    for cliente_pacote, cliente, pacote in pacotes_reservados:
+    for pacote in pacotes_reservados:
         pacote_info = {
-            'pacote_codigo': pacote.codigo,
-            'valor': pacote.valor,
+            'pacote_codigo': str(pacote['_id']),
+            'valor': pacote['valor'],
             'cliente': {
-                'cliente_codigo': cliente.codigo,
-                'email': cliente.email
+                'cliente_codigo': str(pacote['Cliente_codigo']),  # Certifique-se de ajustar conforme a estrutura real
+                'email': get_email_from_cliente(pacote['Cliente_codigo'])
             },
             'visitas': []
         }
 
         # Buscar as visitas associadas a cada pacote
-        visitas_pacote = Pacote_Visita.query.filter_by(Pacote_codigo=pacote.codigo).all()
-        for visita_pacote in visitas_pacote:
-            visita = Visita.query.get(visita_pacote.Visita_codigo)
+        for item in pacote['itens']:
+            visita = db.visitas.find_one({'_id': item['Visita_codigo']})
             if visita:
                 pacote_info['visitas'].append({
-                    'visita_codigo': visita.codigo,
-                    'nome': visita.nome,
+                    'visita_codigo': str(visita['_id']),
+                    'nome': visita['nome'],
                     # inclua outros detalhes da visita conforme necessário
                 })
 
         resultado.append(pacote_info)
 
     return jsonify(resultado), 200
-
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)
